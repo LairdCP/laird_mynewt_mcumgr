@@ -26,6 +26,15 @@
 #include "mgmt/endian.h"
 #include "mgmt/mgmt.h"
 #include "smp/smp.h"
+#include "../../../../../bt6xx_firmware/common/include/SensorTask.h"
+
+#include <logging/log.h>
+LOG_MODULE_REGISTER(mcu_smp, LOG_LEVEL_ERR);
+
+#define SMP_DEBUG_BUFFER_SIZE 32
+#define SMP_DEBUG_CHARACTERS_PER_BYTE 3
+
+static void smp_debug(struct mgmt_ctxt *cbuf, const struct mgmt_hdr *req_hdr);
 
 static int
 smp_align4(int x)
@@ -191,7 +200,7 @@ smp_handle_single_payload(struct mgmt_ctxt *cbuf,
     if (handler_fn) {
         *handler_found = true;
         mgmt_evt(MGMT_EVT_OP_CMD_RECV, req_hdr->nh_group, req_hdr->nh_id, NULL);
-
+	smp_debug(cbuf, req_hdr);
         rc = handler_fn(cbuf);
     } else {
         rc = MGMT_ERR_ENOTSUP;
@@ -392,4 +401,36 @@ smp_process_request_packet(struct smp_streamer *streamer, void *req)
     mgmt_streamer_free_buf(&streamer->mgmt_stmr, req);
     mgmt_streamer_free_buf(&streamer->mgmt_stmr, rsp);
     return 0;
+}
+
+static void smp_debug(struct mgmt_ctxt *cbuf, const struct mgmt_hdr *req_hdr)
+{
+    uint8_t string_buf[SMP_DEBUG_BUFFER_SIZE *
+                        SMP_DEBUG_CHARACTERS_PER_BYTE] = {0};
+    uint8_t time_buf[SENSOR_TASK_RTC_TIMESTAMP_SIZE] = {0};
+    uint8_t string_buf_index;
+
+    SensorTask_GetTimeString(time_buf);
+
+    if (cbuf->it.parser->d->message_size >= SMP_DEBUG_BUFFER_SIZE) {
+        sprintf(string_buf,"%s","message too long");
+    }
+    else {
+        for (string_buf_index = 0;
+                string_buf_index < cbuf->it.parser->d->message_size;
+                    string_buf_index++)
+        {
+            sprintf(&string_buf[string_buf_index*3],
+                    "%2.2x ",
+                    cbuf->it.parser->d->get8(
+                        cbuf->it.parser->d,string_buf_index) & 0xff);
+        }
+        string_buf[string_buf_index*3 - 1] = '\0';
+    }
+    LOG_ERR("%s method %d group %d length %d payload %s",
+            log_strdup(time_buf),
+            req_hdr->nh_id,
+            req_hdr->nh_group,
+            cbuf->it.parser->d->message_size,
+            log_strdup(string_buf));
 }
